@@ -1,0 +1,10 @@
+{
+  "name": "agent-weave",
+  "version": "0.1.0",
+  "description": "Discover, search, and read agent assets across local projects and user directories.",
+  "author": {
+    "name": "KNHui"
+  },
+  "homepage": "https://github.com/KNHui/agent-weave",
+  "repository": "https://github.com/KNHui/agent-weave"
+}

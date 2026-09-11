@@ -1,0 +1,16 @@
+{
+  "name": "agent-weave",
+  "owner": {
+    "name": "KNHui"
+  },
+  "metadata": {
+    "description": "Discover, search, and read agent assets across local projects and user directories."
+  },
+  "plugins": [
+    {
+      "name": "agent-weave",
+      "source": "./plugins/agent-weave",
+      "description": "Discover, search, and read agent assets across local projects and user directories."
+    }
+  ]
+}

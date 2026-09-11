@@ -1,0 +1,20 @@
+{
+  "name": "agent-weave",
+  "interface": {
+    "displayName": "Agent Weave"
+  },
+  "plugins": [
+    {
+      "name": "agent-weave",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-weave"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

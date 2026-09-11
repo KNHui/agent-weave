@@ -1,0 +1,14 @@
+{
+  "name": "agent-weave",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test",
+    "check": "npm run build && npm test"
+  },
+  "dependencies": { "@modelcontextprotocol/sdk": "1.30.0", "zod": "^4.0.0" },
+  "devDependencies": { "esbuild": "0.28.2" }
+}

@@ -4,7 +4,11 @@
 
 Developer A gathers scattered agent assets into a project and shares them through Git. Developer B clones the project and uses the shared procedure from a different supported coding client.
 
-Initial client targets: Claude Code and Codex. Initial deployment: a local MCP server with shared core operations available to a companion CLI. Runtime and SDK selection remain open.
+Initial client targets: Claude Code and Codex plugins, plus direct MCP configuration for Cursor and VS Code. Initial deployment: a local stdio MCP server using Node.js 22+ and the official JavaScript/TypeScript MCP SDK. The server is bundled for dependency-free installation; a configuration-printing helper is provided for other clients.
+
+## Current preview
+
+Version 0.1 implements `discover_assets`, `search`, and `read`, with an `inspect-assets` skill. It does not implement imports, synchronization, context routing, or doctor. Discovery recognizes text documents, bounds traversal and document size, skips local bindings and caches, and reports out-of-root links. It does not yet classify every supporting asset or rewrite references. The requirements below describe the full MVP, not completed functionality.
 
 ## Assets and sources
 
