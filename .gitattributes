@@ -1,0 +1,3 @@
+* text=auto eol=lf
+*.cjs linguist-generated=true
+plugins/agent-weave/skills/** linguist-generated=true
