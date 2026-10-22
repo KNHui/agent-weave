@@ -12,13 +12,13 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const json = async (file) => JSON.parse(await readFile(path.join(root, file), 'utf8'));
 
 test('all catalogs resolve to packaged skills with a single editable source', async () => {
-  for (const file of ['.agents/plugins/marketplace.json', '.claude-plugin/marketplace.json', '.cursor-plugin/marketplace.json']) {
+  for (const skill of ['inspect-assets', 'plan-import']) for (const file of ['.agents/plugins/marketplace.json', '.claude-plugin/marketplace.json', '.cursor-plugin/marketplace.json']) {
     const catalog = await json(file);
     assert.equal(catalog.name, 'agent-weave');
     const entry = catalog.plugins[0];
     const source = typeof entry.source === 'string' ? entry.source : entry.source.path;
     assert.equal(entry.name, 'agent-weave');
-    assert.equal(await readFile(path.join(root, source, 'skills/inspect-assets/SKILL.md'), 'utf8'), await readFile(path.join(root, '.agents/skills/inspect-assets/SKILL.md'), 'utf8'));
+    assert.equal(await readFile(path.join(root, source, `skills/${skill}/SKILL.md`), 'utf8'), await readFile(path.join(root, `.agents/skills/${skill}/SKILL.md`), 'utf8'));
   }
   assert.equal(configuration('cursor').mcpServers['agent-weave'].command, process.execPath);
   assert.equal(configuration('vscode').servers['agent-weave'].type, 'stdio');
@@ -41,7 +41,7 @@ for (const clientName of ['claude', 'codex']) test(`${clientName} copied plugin 
     await rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
   await client.connect(transport);
-  assert.deepEqual((await client.listTools()).tools.map((tool) => tool.name).sort(), ['discover_assets', 'read', 'search']);
+  assert.deepEqual((await client.listTools()).tools.map((tool) => tool.name).sort(), ['discover_assets', 'list_import_candidates', 'plan_import', 'read', 'search']);
   const result = await client.callTool({ name: 'discover_assets', arguments: { project_root: project } });
   const inventory = JSON.parse(result.content[0].text);
   assert.equal(inventory.assets.length, 1);
@@ -49,6 +49,8 @@ for (const clientName of ['claude', 'codex']) test(`${clientName} copied plugin 
   assert.equal(JSON.parse(read.content[0].text).content, '# MCP fixture');
   const search = await client.callTool({ name: 'search', arguments: { project_root: project, query: 'fixture' } });
   assert.equal(JSON.parse(search.content[0].text).matches.length, 1);
+  const plan = await client.callTool({ name: 'plan_import', arguments: { source_root: project, destination_root: temporary, select: ['.agents/example.md'] } });
+  assert.equal(JSON.parse(plan.content[0].text).files[0].destination, '.agents/example.md');
   const error = await client.callTool({ name: 'read', arguments: { project_root: project, id: '0'.repeat(64) } });
   assert.equal(error.isError, true);
 });

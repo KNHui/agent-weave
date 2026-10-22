@@ -4,7 +4,7 @@ Reuse agent skills, rules, and project knowledge across projects—adapted to ea
 
 Agent Weave helps teams discover useful agent knowledge in existing projects, with a planned workflow for adapting and importing it into new ones. The current preview supports read-only discovery, search, and retrieval.
 
-**Status:** Early preview. Read-only discovery, search, and read are implemented. Import planning/application, synchronization, context routing, and doctor are not implemented yet.
+**Status:** Early preview. Read-only discovery, search, read, and import planning (`list_import_candidates`, `plan_import`) are implemented. Applying imports, client entry points, synchronization, context routing, and doctor are not implemented yet.
 
 ## Install
 
@@ -58,7 +58,7 @@ In your target project, ask:
 
 To include your personal skills, explicitly ask to include user-level sources. For a monorepo, identify each application root or add its agent directories as additional roots. The server never assumes its installation directory is your target project.
 
-Returned documents enter your coding client's context and follow that client's data handling. Agent Weave itself has no network requests, telemetry, or file-writing tools.
+Returned documents enter your coding client's context and follow that client's data handling. Agent Weave itself has no network requests, telemetry, or file-writing tools. Import planning reads the source's Git revision and `origin` remote locally; credentials in the remote URL are removed from output.
 
 ## Development
 

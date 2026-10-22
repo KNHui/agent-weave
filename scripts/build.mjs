@@ -8,7 +8,7 @@ const target = path.join(root, 'plugins/agent-weave');
 const metadata = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const base = {
   name: 'agent-weave', version: metadata.version,
-  description: 'Discover, search, and read agent assets across local projects and user directories.',
+  description: 'Discover, search, read, and plan reuse of agent assets across local projects and user directories.',
   author: { name: 'KNHui' },
   homepage: 'https://github.com/KNHui/agent-weave',
   repository: 'https://github.com/KNHui/agent-weave',
