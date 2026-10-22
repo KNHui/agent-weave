@@ -1,8 +1,8 @@
 # Agent Weave
 
-Gather scattered agent skills, rules, commands, docs, and specs into a shared, Git-backed source of truth.
+Reuse agent skills, rules, and project knowledge across projects—adapted to each project's stack and conventions.
 
-Agent Weave is a local MCP server and plugin for teams using multiple AI coding tools. Version 0.1 discovers, searches, and reads agent documents across project and optional user scopes. It identifies exact-content duplicates and reports skipped paths. Consolidating assets into a Git project's `.agents` directory is the next milestone.
+Agent Weave helps teams discover useful agent knowledge in existing projects, with a planned workflow for adapting and importing it into new ones. The current preview supports read-only discovery, search, and retrieval.
 
 **Status:** Early preview. Read-only discovery, search, and read are implemented. Import planning/application, synchronization, context routing, and doctor are not implemented yet.
 
