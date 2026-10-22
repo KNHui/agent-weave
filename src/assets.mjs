@@ -8,8 +8,8 @@ const MAX_ENTRIES = 10000;
 const MAX_ASSETS = 2000;
 const excluded = new Set(['node_modules', '.git', 'local', 'cache', 'dist']);
 const extensions = new Set(['.md', '.mdc', '.markdown', '.txt']);
-const digest = (value) => createHash('sha256').update(value).digest('hex');
-const inside = (root, file) => {
+export const digest = (value) => createHash('sha256').update(value).digest('hex');
+export const inside = (root, file) => {
   const rel = path.relative(root, file);
   return rel === '' || (!path.isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`));
 };

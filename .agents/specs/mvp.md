@@ -10,7 +10,7 @@ See [the project reuse design](2026-10-22-project-packs-design.md) for the first
 
 ## Current preview
 
-Version 0.1 implements `discover_assets`, `search`, and `read`, with an `inspect-assets` skill. It does not implement imports, synchronization, context routing, or doctor. Discovery recognizes text documents, bounds traversal and document size, skips local bindings and caches, and reports out-of-root links. It does not yet inventory every supporting file or rewrite references. A discovery result without diagnostics is not proof of a complete dependency bundle. The requirements below are proposed work, not completed functionality.
+Version 0.1 implements `discover_assets`, `search`, and `read`, with an `inspect-assets` skill. The current preview adds read-only `list_import_candidates` and `plan_import` with a `plan-import` skill; see [the implementation plan](2026-10-22-import-implementation-plan.md). Applying imports, client entry points, synchronization, context routing, and doctor are not implemented. Discovery recognizes text documents, bounds traversal and document size, skips local bindings and caches, and reports out-of-root links. It does not yet inventory every supporting file or rewrite references. A discovery result without diagnostics is not proof of a complete dependency bundle. The requirements below are proposed work, not completed functionality.
 
 ## Assets and sources
 

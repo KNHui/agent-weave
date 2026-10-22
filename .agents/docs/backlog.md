@@ -12,6 +12,13 @@ Prioritize bringing useful knowledge from an existing project into a new project
 
 These capabilities do not implement import, complete support-file inventory, native adoption bindings, updates, context routing, or doctor.
 
+## Delivered after 0.1
+
+- Read-only `list_import_candidates` and `plan_import` with a `plan-import` skill: selected bundles with support files and transitive Markdown references, destination mapping, collision and path-safety checks, heuristic machine-path and secret findings, adaptation sites, reviewed adaptations, reference rewrites, diff preview, and a plan ID. See the [implementation plan](../specs/2026-10-22-import-implementation-plan.md).
+- Synthetic TypeScript/pnpm source and Python/uv destination fixtures.
+
+Remaining items 1–3 below are covered by this preview except out-of-root inclusion and script dependency analysis.
+
 ## Remaining first-adoption work
 
 1. **Reuse fixtures and contract:** model an ordinary source project and structurally different destinations with a representative skill, references, scripts, and project-specific values. Define minimal file/dependency, plan, and provenance records. Preserve the existing runtime and MCP SDK choices; do not require a pack format or predetermined manifest filenames.

@@ -54,7 +54,7 @@ Use `node scripts/mcp-config.mjs generic` for clients accepting `mcpServers` wit
 - **No tools after installation:** start a new session and check the client's MCP connection logs.
 - **Empty inventory:** pass the target application directory as `project_root`; it must not be the plugin cache directory.
 - **Skipped symlink:** add the intended target as an explicit additional root if it is in scope.
-- **Import requested:** the current preview can inspect assets only. Import and configuration migration remain on the backlog.
+- **Import requested:** the current preview can plan imports with `plan_import` but cannot apply them. Applying plans and client entry points remain on the backlog.
 
 ## Verification scope
 
