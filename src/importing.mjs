@@ -99,9 +99,20 @@ async function evidence(root) {
   return { markers: found, tools: [...tools].sort(), package_scripts: packageScripts, agent_locations: locations };
 }
 
-function frontmatter(text) {
-  const block = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? '';
-  const field = (key) => block.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'))?.[1].trim().replace(/^["']|["']$/g, '');
+// Top-level scalars only: plain or quoted values, indented continuation lines, and `>`/`|` block scalars.
+export function frontmatter(text) {
+  const rows = (text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? '').split(/\r?\n/);
+  const field = (key) => {
+    const index = rows.findIndex((row) => row.startsWith(`${key}:`));
+    if (index === -1) return undefined;
+    const head = rows[index].slice(key.length + 1).trim();
+    const end = rows.findIndex((row, at) => at > index && row.trim() && !/^\s/.test(row));
+    const body = rows.slice(index + 1, end === -1 ? undefined : end).map((row) => row.trim());
+    const block = /^[>|][+-]?$/.test(head);
+    const parts = block ? body : [head, ...body];
+    const value = (head.startsWith('|') ? parts.join('\n') : parts.filter(Boolean).join(' ')).trim();
+    return (block ? value : value.replace(/^(["'])([\s\S]*)\1$/, '$2')) || undefined;
+  };
   return { name: field('name'), description: field('description'), allowedTools: field('allowed-tools') };
 }
 
@@ -163,9 +174,9 @@ async function readFileBounded(file, size) {
   return bytes.length > LIMITS.bytes ? undefined : bytes;
 }
 
-function createBundle(root, exclude) {
+function createBundle(root, exclude, { adaptations = [], destination, target = (rel) => rel } = {}) {
   const excluded = exclude.map(trimSlashes);
-  const bundle = { root, files: new Map(), dirs: new Set(), walked: new Set(), aliases: [], excluded: new Set(), findings: [] };
+  const bundle = { root, destination, target, adaptations, files: new Map(), dirs: new Set(), walked: new Set(), aliases: [], excluded: new Set(), findings: [] };
   bundle.isExcluded = (rel) => excluded.some((item) => under(rel, item));
   bundle.find = (code, rel, detail) => {
     if (!bundle.findings.some((item) => item.code === code && item.path === rel)) bundle.findings.push({ code, severity: blocking.has(code) ? 'blocking' : 'advisory', path: rel, detail });
@@ -197,11 +208,41 @@ async function collect(bundle, rel, role, depth = 0) {
   if (!info.isFile()) return bundle.find('unsupported_file', rel, 'Only regular files and directories can be imported');
   const content = await readFileBounded(canonical, info.size);
   if (!content) return bundle.find('too_large', rel, `File exceeds ${LIMITS.bytes} bytes`);
-  bundle.files.set(rel, {
+  const file = {
     source: rel, role, alias_of: canonicalRel === rel ? undefined : canonicalRel, content,
     hash: digest(content), bytes: content.length, text: !content.includes(0),
-    executable: process.platform !== 'win32' && (info.mode & 0o111) !== 0, links: [],
-  });
+    executable: process.platform !== 'win32' && (info.mode & 0o111) !== 0, links: [], destinationLinks: [], adaptations: [],
+  };
+  if (file.text) file.adapted = adapt(bundle, file);
+  bundle.files.set(rel, file);
+}
+
+// Reviewed adaptations apply before references are followed, so links an adaptation removes are not required.
+function adapt(bundle, file) {
+  let text = file.content.toString('utf8');
+  for (const item of bundle.adaptations.filter((entry) => entry.file === file.source)) {
+    if (item.content !== undefined) { text = item.content; file.rewritten = true; file.adaptations.push(item.index); continue; }
+    const count = text.split(item.find).length - 1;
+    if (count === 0 || (count > 1 && !item.all)) {
+      item.status = count ? 'ambiguous' : 'not_found';
+      bundle.find(count ? 'adaptation_ambiguous' : 'adaptation_not_found', `${file.source}#adaptation-${item.index}`, count ? `Matches ${count} times; make find unique or set all` : 'find text does not occur in the source file');
+      continue;
+    }
+    text = text.split(item.find).join(item.replace);
+    file.adaptations.push(item.index);
+  }
+  return text;
+}
+
+// A link absent from the source, or from rewritten text, may name a document the destination already owns at the mapped location.
+async function destinationReference(bundle, file, link) {
+  if (!bundle.destination) return undefined;
+  const rel = posix.normalize(posix.join(posix.dirname(bundle.target(file.source)), link.target)).replace(/\/$/, '');
+  if (rel === '..' || rel.startsWith('../') || posix.isAbsolute(rel)) return undefined;
+  try {
+    const real = await realpath(local(bundle.destination, rel));
+    return inside(bundle.destination, real) && !inside(bundle.root, real) ? rel : undefined;
+  } catch { return undefined; }
 }
 
 // Follow Markdown references transitively within source_root.
@@ -211,11 +252,17 @@ async function resolveReferences(bundle) {
     const file = queue.shift();
     if (!file.text || !markdown.has(posix.extname(file.source).toLowerCase())) continue;
     const targets = [];
-    mapLinks(file.content.toString('utf8'), (link) => { targets.push(link); });
+    mapLinks(file.adapted, (link) => { targets.push(link); });
     for (const link of targets) {
       const rel = posix.normalize(posix.join(posix.dirname(file.source), link.target)).replace(/\/$/, '');
       file.links.push({ ...link, rel });
-      if (rel === '..' || rel.startsWith('../')) {
+      // A rewrite is authored for the destination, so its links prefer documents the destination already owns.
+      const outside = rel === '..' || rel.startsWith('../');
+      if (outside || file.rewritten || !(await lstat(local(bundle.root, rel)).then(() => true, () => false))) {
+        const owned = await destinationReference(bundle, file, link);
+        if (owned) { if (!file.destinationLinks.includes(owned)) file.destinationLinks.push(owned); continue; }
+      }
+      if (outside) {
         if (bundle.isExcluded(rel)) bundle.excluded.add(rel);
         else bundle.find('outside_root', rel, 'Link target leaves source_root; move it into the source or exclude it');
         continue;
@@ -231,7 +278,10 @@ export async function listCandidates(options) {
   const { source, destination } = await projects(options);
   const inventory = await discover({ project_root: source });
   const relative = (file) => toPosix(path.relative(source, file));
-  const skillDirs = inventory.assets.filter((asset) => asset.name === 'SKILL.md').map((asset) => posix.dirname(relative(asset.path)));
+  // Asset names can be link names; the canonical path decides whether a file is a skill entry.
+  const skillDirs = inventory.assets.map((asset) => relative(asset.path)).filter((rel) => posix.basename(rel) === 'SKILL.md').map((rel) => posix.dirname(rel));
+  const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const mentions = (text) => skillDirs.filter((dir) => new RegExp(escape(dir) + '(?![\\w.-])').test(text)).map((dir) => `skill:${dir}`);
   const candidates = [];
   for (const dir of skillDirs) {
     const bundle = createBundle(source, []);
@@ -248,7 +298,8 @@ export async function listCandidates(options) {
     const kind = classify(rel);
     const text = await readFile(asset.path, 'utf8').catch(() => '');
     const description = frontmatter(text).description ?? text.match(/^#\s+(.+)$/m)?.[1];
-    candidates.push({ key: `${kind}:${rel}`, kind, path: rel, description, files: 1, bytes: asset.bytes });
+    const related = mentions(text);
+    candidates.push({ key: `${kind}:${rel}`, kind, path: rel, description, related: related.length ? related : undefined, files: 1, bytes: asset.bytes });
   }
   candidates.sort((a, b) => a.path.localeCompare(b.path));
   const diagnostics = inventory.diagnostics.map((item) => ({
@@ -257,7 +308,7 @@ export async function listCandidates(options) {
   return {
     source: await identity(source), evidence: { source: await evidence(source), destination: await evidence(destination) },
     candidates, diagnostics, truncated: inventory.truncated,
-    note: 'Candidates are classified by location only. Judge relevance from their content and the destination evidence, then pass selected paths to plan_import.',
+    note: 'Candidates are classified by location only. Judge relevance from their content and the destination evidence, then pass selected paths to plan_import. related names skills a file mentions, such as a command wrapper for a skill.',
   };
 }
 
@@ -336,7 +387,7 @@ function adaptationSites(bundle, sourceEvidence, destinationEvidence, mapped) {
   const tokens = sourceEvidence.tools.filter((tool) => commands[tool] && !destinationEvidence.tools.includes(tool)).flatMap((tool) => commands[tool].map((command) => [tool, command]));
   for (const file of bundle.files.values()) {
     if (!file.text) continue;
-    const text = file.content.toString('utf8');
+    const text = file.adapted;
     const isMarkdown = markdown.has(posix.extname(file.source).toLowerCase());
     const code = isMarkdown ? [...text.matchAll(codeSpans)].map((match) => [match[0], match.index]) : [[text, 0]];
     for (const [segment, offset] of code) {
@@ -385,7 +436,14 @@ function scanContent(bundle, file, text) {
 export async function planImport(options) {
   const { source, destination } = await projects(options);
   const { select, exclude = [], mappings = {}, resolutions = {}, adaptations = [], include_preview = true } = options;
-  const bundle = createBundle(source, exclude);
+  const reviewed = adaptations.map((item, index) => {
+    const rewrite = item.content !== undefined;
+    if (rewrite === (item.find !== undefined || item.replace !== undefined) || (!rewrite && (typeof item.find !== 'string' || !item.find || typeof item.replace !== 'string'))) {
+      throw new Error(`Adaptation ${index} needs either content or both find and replace`);
+    }
+    return { index, ...item, file: trimSlashes(item.file), status: 'applied' };
+  });
+  const bundle = createBundle(source, exclude, { adaptations: reviewed, destination, target: (rel) => mapPath(rel, mappings) });
   const selection = [];
   for (const value of select) {
     let rel = selectionPath(value);
@@ -405,7 +463,6 @@ export async function planImport(options) {
   await resolveReferences(bundle);
 
   const destinations = new Map([...bundle.files.keys(), ...bundle.dirs].map((rel) => [rel, mapPath(rel, mappings)]));
-  const reviewed = adaptations.map((item, index) => ({ index, ...item, file: trimSlashes(item.file), status: 'applied' }));
   const files = [];
   const preview = [];
   const seen = new Map();
@@ -414,23 +471,13 @@ export async function planImport(options) {
     const target = destinations.get(file.source);
     const record = {
       source: file.source, destination: target, role: file.role, alias_of: file.alias_of, hash: file.hash,
-      bytes: file.bytes, executable: file.executable, text: file.text, rewrites: [], adaptations: [],
+      bytes: file.bytes, executable: file.executable, text: file.text, rewrites: [], adaptations: file.adaptations,
+      destination_references: file.destinationLinks.length ? file.destinationLinks.sort() : undefined,
     };
     let result = file.content;
     if (file.text) {
-      let text = file.content.toString('utf8');
-      for (const item of reviewed.filter((entry) => entry.file === file.source)) {
-        const count = text.split(item.find).length - 1;
-        if (count === 0 || (count > 1 && !item.all)) {
-          item.status = count ? 'ambiguous' : 'not_found';
-          bundle.find(count ? 'adaptation_ambiguous' : 'adaptation_not_found', `${file.source}#adaptation-${item.index}`, count ? `Matches ${count} times; make find unique or set all` : 'find text does not occur in the source file');
-          continue;
-        }
-        text = text.split(item.find).join(item.replace);
-        record.adaptations.push(item.index);
-      }
       const links = new Map(file.links.map((link) => [link.target, link]));
-      text = mapLinks(text, (link) => {
+      const text = mapLinks(file.adapted, (link) => {
         const known = links.get(link.target);
         const rel = known?.rel ?? posix.normalize(posix.join(posix.dirname(file.source), link.target)).replace(/\/$/, '');
         if (!destinations.has(rel)) return undefined;
@@ -484,18 +531,21 @@ export async function planImport(options) {
   const ready = !findings.some((item) => item.severity === 'blocking');
   const plan_id = digest(stable({
     version: 1, source: sourceIdentity, selection, exclude: [...bundle.excluded].sort(), mappings, resolutions,
-    adaptations: reviewed.map(({ file, find, replace, all }) => ({ file, find, replace, all: Boolean(all) })),
-    files: files.map(({ source: from, destination: to, hash, result_hash, destination_state, executable, action }) => ({ from, to, hash, result_hash, destination_state, executable, action })),
+    adaptations: reviewed.map(({ file, find, replace, content, all }) => ({ file, find, replace, content, all: Boolean(all) })),
+    files: files.map(({ source: from, destination: to, hash, result_hash, destination_state, executable, action, destination_references }) => ({ from, to, hash, result_hash, destination_state, executable, action, destination_references })),
   }));
   return {
     version: 1, plan_id, ready, source: sourceIdentity,
     evidence: { source: sourceEvidence, destination: destinationEvidence },
     selection, files, excluded: [...bundle.excluded].sort(), aliases: bundle.aliases,
-    adaptations: reviewed.map(({ index, ...item }) => item), findings, adaptation_sites: sites, preview,
+    // Rewritten content is shown in the preview diff; echoing it here would double the response.
+    adaptations: reviewed.map(({ index, content, ...item }) => content === undefined ? item : { ...item, content_hash: digest(content) }),
+    findings, adaptation_sites: sites, preview,
     notes: [
       'Read-only plan. Applying plans is not implemented yet; no files were written.',
-      'Adaptations are reviewed inputs, not engine conclusions. Secret and machine-path detection is heuristic.',
-      'Script dependencies are not analyzed. Out-of-root inclusion is not supported; move the file into the source or exclude it.',
+      'Adaptations are reviewed inputs, not engine conclusions. They apply before references are followed. Secret and machine-path detection is heuristic.',
+      'destination_references are links satisfied by files the destination already owns; they are not copied.',
+      'Script dependencies are not analyzed. Out-of-root inclusion is not supported; adapt the link away, exclude it, or move the file into the source.',
     ],
   };
 }

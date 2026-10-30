@@ -14,7 +14,7 @@ These capabilities do not implement import, complete support-file inventory, nat
 
 ## Delivered after 0.1
 
-- Read-only `list_import_candidates` and `plan_import` with a `plan-import` skill: selected bundles with support files and transitive Markdown references, destination mapping, collision and path-safety checks, heuristic machine-path and secret findings, adaptation sites, reviewed adaptations, reference rewrites, diff preview, and a plan ID. See the [implementation plan](../specs/2026-10-22-import-implementation-plan.md).
+- Read-only `list_import_candidates` and `plan_import` with a `plan-import` skill: selected bundles with support files and transitive Markdown references, destination mapping, collision and path-safety checks, heuristic machine-path and secret findings, adaptation sites, reviewed find/replace and whole-file adaptations applied before references are followed, destination-owned references, reference rewrites, diff preview, and a plan ID. See the [implementation plan](../specs/2026-10-22-import-implementation-plan.md).
 - Synthetic TypeScript/pnpm source and Python/uv destination fixtures.
 
 Remaining items 1–3 below are covered by this preview except out-of-root inclusion and script dependency analysis.

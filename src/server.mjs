@@ -49,11 +49,12 @@ async function main() {
       resolutions: z.record(z.string().min(1), z.enum(['keep_destination'])).default({}).describe('Destination path to resolution for reported conflicts'),
       adaptations: z.array(z.object({
         file: z.string().min(1).describe('Source-relative file to adapt'),
-        find: z.string().min(1).describe('Exact source text; must match once unless all is true'),
-        replace: z.string(),
+        find: z.string().min(1).optional().describe('Exact source text; must match once unless all is true'),
+        replace: z.string().optional(),
+        content: z.string().optional().describe('Reviewed full replacement text for the file, used instead of find/replace when a procedure is rewritten for the destination'),
         reason: z.string().min(1).describe('Destination evidence or user decision behind the change'),
         all: z.boolean().default(false),
-      })).max(200).default([]),
+      })).max(200).default([]).describe('Each item uses either find and replace or content. Adaptations apply before references are followed'),
       include_preview: z.boolean().default(true),
     }, annotations,
   }, (args) => reply(() => planImport(args)));

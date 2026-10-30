@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { listCandidates, planImport, sanitizeRemote, unifiedDiff } from '../src/importing.mjs';
+import { frontmatter, listCandidates, planImport, sanitizeRemote, unifiedDiff } from '../src/importing.mjs';
 import { canSymlinkFiles, reuseFixture, snapshot } from './reuse-fixtures.mjs';
 
 const codes = (plan, severity) => plan.findings.filter((item) => !severity || item.severity === severity).map((item) => item.code);
@@ -86,6 +86,59 @@ test('reviewed adaptations and mappings produce a ready plan with rewritten refe
   // Identical existing content is unchanged, supporting safe reapplication.
   await writeFile(path.join(destination, '.agents/skills/release-notes/templates/notes.md'), '## Highlights\n\n- \n');
   assert.equal((await planImport(request)).files.find((item) => item.destination.endsWith('templates/notes.md')).action, 'unchanged');
+});
+
+test('a reviewed rewrite replaces source policy, drops its references, and links destination-owned documents', async (t) => {
+  const { root, source, destination } = await reuseFixture(t);
+  await writeFile(path.join(root, 'monorepo-policy.md'), 'outside');
+  const original = path.join(source, `${skill}/SKILL.md`);
+  await writeFile(original, `${await readFile(original, 'utf8')}See the [branch strategy](../../../../monorepo-policy.md).\n`);
+  const base = { source_root: source, destination_root: destination, select: [skill] };
+  assert.ok(codes(await planImport(base), 'blocking').includes('outside_root'));
+
+  // docs/release-policy.md exists in both projects; adapted text links the destination's copy instead of importing the source's.
+  const content = '---\nname: release-notes\ndescription: Draft release notes.\n---\n# Release notes\n\nFollow the [team rules](../../docs/existing.md) and [policy](../../../docs/release-policy.md).\nUse the [template](templates/notes.md).\n';
+  const rewrite = { file: `${skill}/SKILL.md`, content, reason: 'Destination owns branch policy in .agents/docs/existing.md' };
+  const plan = await planImport({ ...base, adaptations: [rewrite] });
+  assert.deepEqual(codes(plan, 'blocking'), []);
+  assert.equal(plan.ready, true);
+  const entry = plan.files.find((item) => item.source === `${skill}/SKILL.md`);
+  assert.deepEqual(entry.adaptations, [0]);
+  assert.deepEqual(entry.destination_references, ['.agents/docs/existing.md', 'docs/release-policy.md']);
+  assert.ok(!plan.files.some((item) => item.source.startsWith('docs/')), 'references removed by the rewrite are not collected');
+  assert.ok(!plan.adaptation_sites.some((site) => site.tool === 'pnpm'), 'sites reflect adapted text');
+  assert.equal(plan.adaptations[0].content, undefined);
+  assert.match(plan.adaptations[0].content_hash, /^[a-f0-9]{64}$/);
+  assert.ok(plan.preview.find((item) => item.destination === entry.destination).diff.includes('+Follow the [team rules](../../docs/existing.md) and [policy](../../../docs/release-policy.md).'));
+  assert.notEqual((await planImport({ ...base, adaptations: [{ ...rewrite, content: `${content}\n` }] })).plan_id, plan.plan_id);
+
+  await assert.rejects(planImport({ ...base, adaptations: [{ ...rewrite, find: 'x', replace: 'y' }] }), /either content or both find and replace/);
+  await assert.rejects(planImport({ ...base, adaptations: [{ file: rewrite.file, find: 'x', reason: 'r' }] }), /either content or both find and replace/);
+});
+
+test('frontmatter reads block scalars and continuation lines', () => {
+  assert.deepEqual(frontmatter('---\nname: a\ndescription: >\n  Start work from a ticket.\n  Prepare a worktree.\nallowed-tools: Bash\n---\n'), {
+    name: 'a', description: 'Start work from a ticket. Prepare a worktree.', allowedTools: 'Bash',
+  });
+  assert.equal(frontmatter('---\ndescription: |-\n  one\n  two\n---\n').description, 'one\ntwo');
+  assert.equal(frontmatter('---\ndescription: "quoted: value"\n---\n').description, 'quoted: value');
+  assert.equal(frontmatter('---\ndescription: plain\n  continued\nname: x\n---\n').description, 'plain continued');
+  assert.equal(frontmatter('# no frontmatter\n').description, undefined);
+});
+
+test('candidates describe folded skills, keep linked skills whole, and relate command wrappers', async (t) => {
+  const { source, destination } = await reuseFixture(t);
+  await mkdir(path.join(source, '.agents/skills/start-ticket'), { recursive: true });
+  await writeFile(path.join(source, '.agents/skills/start-ticket/SKILL.md'), '---\nname: start-ticket\ndescription: >\n  Start a ticket.\n---\n# Start\n');
+  await mkdir(path.join(source, '.agents/commands'), { recursive: true });
+  await writeFile(path.join(source, '.agents/commands/start-ticket.md'), '# Wrapper\n\nFollow `.agents/skills/start-ticket/SKILL.md`.\n');
+  if (canSymlinkFiles) await symlink('../skills/start-ticket/SKILL.md', path.join(source, '.agents/commands/a-linked.md'));
+  const byPath = Object.fromEntries((await listCandidates({ source_root: source, destination_root: destination })).candidates.map((item) => [item.path, item]));
+  assert.equal(byPath['.agents/skills/start-ticket'].kind, 'skill');
+  assert.equal(byPath['.agents/skills/start-ticket'].description, 'Start a ticket.');
+  assert.ok(!byPath['.agents/skills/start-ticket/SKILL.md'], 'a skill reached through a link is still a skill directory');
+  assert.deepEqual(byPath['.agents/commands/start-ticket.md'].related, ['skill:.agents/skills/start-ticket']);
+  assert.equal(byPath[skill].related, undefined);
 });
 
 test('missing and out-of-root references block until excluded', async (t) => {
