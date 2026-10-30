@@ -255,12 +255,17 @@ async function resolveReferences(bundle) {
     mapLinks(file.adapted, (link) => { targets.push(link); });
     for (const link of targets) {
       const rel = posix.normalize(posix.join(posix.dirname(file.source), link.target)).replace(/\/$/, '');
-      file.links.push({ ...link, rel });
+      const reference = { ...link, rel };
+      file.links.push(reference);
       // A rewrite is authored for the destination, so its links prefer documents the destination already owns.
       const outside = rel === '..' || rel.startsWith('../');
       if (outside || file.rewritten || !(await lstat(local(bundle.root, rel)).then(() => true, () => false))) {
         const owned = await destinationReference(bundle, file, link);
-        if (owned) { if (!file.destinationLinks.includes(owned)) file.destinationLinks.push(owned); continue; }
+        if (owned) {
+          reference.destinationOwned = true;
+          if (!file.destinationLinks.includes(owned)) file.destinationLinks.push(owned);
+          continue;
+        }
       }
       if (outside) {
         if (bundle.isExcluded(rel)) bundle.excluded.add(rel);
@@ -462,6 +467,15 @@ export async function planImport(options) {
   }
   await resolveReferences(bundle);
 
+  const destination_reference_states = [];
+  const ownedPaths = [...new Set([...bundle.files.values()].flatMap((file) => file.destinationLinks))].sort();
+  for (const rel of ownedPaths) {
+    const state = await destinationState(destination, source, rel);
+    destination_reference_states.push({ path: rel, hash: state.state ?? 'unsafe' });
+    if (state.unsafe) bundle.find('unsafe_destination', rel, state.unsafe);
+    else if (state.state === 'absent') bundle.find('missing_reference', rel, 'Destination reference disappeared during planning');
+  }
+
   const destinations = new Map([...bundle.files.keys(), ...bundle.dirs].map((rel) => [rel, mapPath(rel, mappings)]));
   const files = [];
   const preview = [];
@@ -479,6 +493,7 @@ export async function planImport(options) {
       const links = new Map(file.links.map((link) => [link.target, link]));
       const text = mapLinks(file.adapted, (link) => {
         const known = links.get(link.target);
+        if (known?.destinationOwned) return undefined;
         const rel = known?.rel ?? posix.normalize(posix.join(posix.dirname(file.source), link.target)).replace(/\/$/, '');
         if (!destinations.has(rel)) return undefined;
         let next = posix.relative(posix.dirname(target), destinations.get(rel)) || posix.basename(destinations.get(rel));
@@ -530,21 +545,21 @@ export async function planImport(options) {
   const findings = bundle.findings.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'blocking' ? -1 : 1));
   const ready = !findings.some((item) => item.severity === 'blocking');
   const plan_id = digest(stable({
-    version: 1, source: sourceIdentity, selection, exclude: [...bundle.excluded].sort(), mappings, resolutions,
+    version: 1, source: sourceIdentity, selection, exclude: [...bundle.excluded].sort(), mappings, resolutions, destination_reference_states,
     adaptations: reviewed.map(({ file, find, replace, content, all }) => ({ file, find, replace, content, all: Boolean(all) })),
     files: files.map(({ source: from, destination: to, hash, result_hash, destination_state, executable, action, destination_references }) => ({ from, to, hash, result_hash, destination_state, executable, action, destination_references })),
   }));
   return {
     version: 1, plan_id, ready, source: sourceIdentity,
     evidence: { source: sourceEvidence, destination: destinationEvidence },
-    selection, files, excluded: [...bundle.excluded].sort(), aliases: bundle.aliases,
+    selection, files, destination_reference_states, excluded: [...bundle.excluded].sort(), aliases: bundle.aliases,
     // Rewritten content is shown in the preview diff; echoing it here would double the response.
     adaptations: reviewed.map(({ index, content, ...item }) => content === undefined ? item : { ...item, content_hash: digest(content) }),
     findings, adaptation_sites: sites, preview,
     notes: [
       'Read-only plan. Applying plans is not implemented yet; no files were written.',
       'Adaptations are reviewed inputs, not engine conclusions. They apply before references are followed. Secret and machine-path detection is heuristic.',
-      'destination_references are links satisfied by files the destination already owns; they are not copied.',
+      'destination_references are links satisfied by files the destination already owns; they are not copied. destination_reference_states snapshots their hashes for plan identity.',
       'Script dependencies are not analyzed. Out-of-root inclusion is not supported; adapt the link away, exclude it, or move the file into the source.',
     ],
   };

@@ -116,6 +116,39 @@ test('a reviewed rewrite replaces source policy, drops its references, and links
   await assert.rejects(planImport({ ...base, adaptations: [{ file: rewrite.file, find: 'x', reason: 'r' }] }), /either content or both find and replace/);
 });
 
+test('destination-owned links survive mappings when the source counterpart is also selected', async (t) => {
+  const { source, destination } = await reuseFixture(t);
+  const content = 'Follow [policy](../../../docs/release-policy.md#rules).\n';
+  const plan = await planImport({
+    source_root: source, destination_root: destination,
+    select: [skill, 'docs/release-policy.md'], mappings: { docs: 'imported-docs' },
+    adaptations: [{ file: `${skill}/SKILL.md`, content, reason: 'Use destination policy' }],
+  });
+  assert.equal(plan.ready, true);
+  const entry = plan.files.find((file) => file.source === `${skill}/SKILL.md`);
+  assert.deepEqual(entry.destination_references, ['docs/release-policy.md']);
+  assert.deepEqual(entry.rewrites, []);
+  assert.ok(plan.preview.find((item) => item.destination === entry.destination).diff.includes(`+${content.trim()}`));
+  assert.equal(plan.files.find((file) => file.source === 'docs/release-policy.md').destination, 'imported-docs/release-policy.md');
+});
+
+test('destination reference content participates in stable plan identity without writes', async (t) => {
+  const { source, destination } = await reuseFixture(t);
+  const request = {
+    source_root: source, destination_root: destination, select: [skill],
+    adaptations: [{ file: `${skill}/SKILL.md`, content: '[policy](../../../docs/release-policy.md)\n', reason: 'Use destination policy' }],
+  };
+  const before = [await snapshot(source), await snapshot(destination)];
+  const plan = await planImport(request);
+  assert.equal((await planImport(request)).plan_id, plan.plan_id);
+  assert.deepEqual([await snapshot(source), await snapshot(destination)], before);
+  await writeFile(path.join(destination, 'docs/release-policy.md'), '# Changed destination policy\n');
+  const changed = await planImport(request);
+  assert.equal(changed.ready, true);
+  assert.notEqual(changed.plan_id, plan.plan_id);
+  assert.equal((await planImport(request)).plan_id, changed.plan_id);
+});
+
 test('frontmatter reads block scalars and continuation lines', () => {
   assert.deepEqual(frontmatter('---\nname: a\ndescription: >\n  Start work from a ticket.\n  Prepare a worktree.\nallowed-tools: Bash\n---\n'), {
     name: 'a', description: 'Start work from a ticket. Prepare a worktree.', allowedTools: 'Bash',
